@@ -1,0 +1,74 @@
+---
+title: Assignment 03
+author:
+  - name: Anu Sharma
+    affiliations:
+      - id: anush09
+        name: Boston University
+        city: Boston
+        state: MA
+number-sections: true
+date: '2025-09-21'
+format:
+  html:
+    theme: cerulean
+    toc: true
+    toc-depth: 2
+date-modified: today
+date-format: long
+execute:
+  echo: false
+  eval: true
+  freeze: auto
+---
+
+```{python}
+import pandas as pd
+import plotly.express as px
+import plotly.io as pio
+from pyspark.sql import SparkSession
+import re
+import numpy as np
+import plotly.graph_objects as go
+from pyspark.sql.functions import col, split, explode, regexp_replace, transform, when
+from pyspark.sql import functions as F
+from pyspark.sql.functions import col, monotonically_increasing_id
+
+np.random.seed(42)
+
+pio.renderers.default = "notebook"
+
+# Initialize Spark Session
+spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+# Load Data
+df = spark.read.option("header", "true").option("inferSchema", "true").option("multiLine","true").option("escape", "\"").csv("./data/lightcast_job_postings.csv")
+df.createOrReplaceTempView("job_postings")
+
+# Show Schema and Sample Data
+print("---This is Diagnostic check, No need to print it in the final doc---")
+
+# df.printSchema() # comment this line when rendering the submission
+df.show(5)
+
+from pyspark.sql.functions import col
+
+# Section 1.1
+df_cleaned = df.withColumn("SALARY", col("SALARY").cast("double")) 
+df_cleaned = df_cleaned.withColumn("SALARY_TO", col("SALARY_TO").cast("double"))
+df_cleaned = df_cleaned.withColumn("SALARY_FROM", col("SALARY_FROM").cast("double"))
+df_cleaned = df_cleaned.withColumn("MIN_YEARS_EXPERIENCE", col("MIN_YEARS_EXPERIENCE").cast("integer"))
+df_cleaned = df_cleaned.withColumn("MAX_YEARS_EXPERIENCE", col("MAX_YEARS_EXPERIENCE").cast("integer"))
+df_cleaned = df_cleaned.filter(col("SALARY").isNotNull() & col("SALARY_TO").isNotNull() & col("SALARY_FROM").isNotNull() & col("MIN_YEARS_EXPERIENCE").isNotNull() & col("MAX_YEARS_EXPERIENCE").isNotNull())
+
+df_cleaned.show(5)
+
+# Section 1.2
+median_from = df_cleaned.approxQuantile("SALARY_FROM", [0.5], 0.0)[0]
+median_to = df_cleaned.approxQuantile("SALARY_TO", [0.5], 0.0)[0]
+median_salary = df_cleaned.approxQuantile("SALARY", [0.5], 0.0)[0]
+
+print("Median From:", median_from)
+print("Median To:", median_to)
+print("Median Salary:", median_salary)
+```
