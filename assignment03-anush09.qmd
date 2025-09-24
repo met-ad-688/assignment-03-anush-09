@@ -23,7 +23,7 @@ execute:
 ---
 
 ```{python}
-#| eval: false
+#| eval: true
 #| echo: false
 #| output: true
 import pandas as pd
@@ -40,6 +40,10 @@ from pyspark.sql.functions import col, monotonically_increasing_id
 np.random.seed(42)
 
 pio.renderers.default = "notebook"
+
+      # df = pd.read_csv("./data/lightcast_job_postings.csv")
+      # unique_values = df['ONET_NAME'].unique()
+      # print(unique_values)
 
 # Initialize Spark Session
 spark = SparkSession.builder.appName("LightcastData").getOrCreate()
@@ -73,6 +77,7 @@ df_cleaned = df \
     .withColumn("MIN_YEARS_EXPERIENCE", col("MIN_YEARS_EXPERIENCE").cast("integer")) \
     .withColumn("MAX_YEARS_EXPERIENCE", col("MAX_YEARS_EXPERIENCE").cast("integer"))
 
+df_cleaned = df_cleaned.withColumn("ONET_NAME", regexp_replace("ONET_NAME", "/", "-"))
 df_cleaned.show(5)
 
 # Section 1.2
@@ -102,10 +107,11 @@ df_cleaned = df_cleaned.withColumn(
 # Section 1.5
 df_cleaned.write.mode("overwrite").option("header", True).csv("data/cleaned_data.csv")
 print(f"Data cleaning complete. Rows retained: {df_cleaned.count()}")
+df_cleaned.createOrReplaceTempView("job_postings")
 ```
 
 ```{python}
-#| eval: true
+#| eval: false
 #| echo: true
 #| output: true
 
@@ -128,8 +134,162 @@ pio.renderers.default = "notebook"
 spark = SparkSession.builder.appName("LightcastData").getOrCreate()
 
 # Load Data
-df = spark.read.option("header", "true").option("inferSchema", "true").option("multiLine","true").option("escape", "\"").csv("./data/cleaned_data.csv")
+df = spark.read.option("header", "true").option("inferSchema", "true").option("multiLine","true").option("escape", "\"").csv("data/cleaned_data.csv")
 df.createOrReplaceTempView("job_postings")
 df.show(5)
+
+```
+
+```{python}
+#| eval: false
+#| echo: true
+#| output: true
+
+# Section 2
+salary_distribution = spark.sql("""
+    SELECT 
+        NAICS2_NAME,
+        EMPLOYMENT_TYPE_NAME,
+        SALARY_FROM
+    FROM job_postings
+    WHERE SALARY_FROM IS NOT NULL AND SALARY_FROM > 0
+""")
+salary_distribution.show()
+df_pd = salary_distribution.toPandas()
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(14, 8))
+sns.set_style("whitegrid")
+
+sns.boxplot(
+    data=df_pd,
+    x="NAICS2_NAME",
+    y="SALARY_FROM",
+    hue="EMPLOYMENT_TYPE_NAME",
+    palette="Set2"
+)
+
+plt.title("Salary Distribution by Industry", fontsize=16, fontweight="bold")
+plt.xlabel("NAICS2_NAME", fontsize=12)
+plt.ylabel("SALARY", fontsize=12)
+plt.xticks(rotation=45)
+plt.legend(title="Employment Type", fontsize=10)
+plt.tight_layout()
+plt.show()
+
+```
+
+```{python}
+#| eval: true
+#| echo: true
+#| output: true
+
+# Section 3
+salary_bubble = spark.sql("""
+    SELECT 
+        LOT_OCCUPATION_NAME,
+        approx_percentile(SALARY, 0.5) AS MEDIAN_SALARY,
+        COUNT(*) AS JOB_COUNT
+    FROM job_postings
+    WHERE SALARY IS NOT NULL AND SALARY > 0
+    GROUP BY LOT_OCCUPATION_NAME
+""")
+
+df_bubble = salary_bubble.toPandas()
+
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(16, 9))
+scatter = plt.scatter(
+    x=df_bubble["LOT_OCCUPATION_NAME"],
+    y=df_bubble["MEDIAN_SALARY"],
+    s=df_bubble["JOB_COUNT"] * 2,  # scale bubble size
+    c=df_bubble["MEDIAN_SALARY"],
+    cmap="coolwarm",
+    alpha=0.7,
+    edgecolors="black",
+    linewidth=0.5
+)
+
+plt.xticks(rotation=45, ha="right")
+plt.title("Median Salary by ONET Occupation Type", fontsize=18, fontweight="bold")
+plt.xlabel("ONET Occupation", fontsize=14)
+plt.ylabel("Median Salary", fontsize=14)
+plt.grid(True)
+plt.colorbar(scatter, label="Median Salary")
+plt.tight_layout()
+plt.show()
+
+```
+
+```{python}
+#| eval: false
+#| echo: true
+#| output: true
+#| 
+from pyspark.sql.functions import explode, trim, lower, col
+
+# Explode EDUCATION_LEVELS array into individual entries
+df_exploded = df_cleaned.withColumn("EDUCATION_ENTRY", explode("EDUCATION_LEVELS_NAME"))
+
+# Normalize text
+df_exploded = df_exploded.withColumn("EDUCATION_ENTRY_CLEAN", trim(lower(col("EDUCATION_ENTRY"))))
+
+from pyspark.sql.functions import when
+
+df_grouped = df_exploded.withColumn("EDUCATION_GROUP",
+    when(col("EDUCATION_ENTRY_CLEAN").isin("high school or ged", "associate degree", "no education listed"), "Associate or Lower")
+    .when(col("EDUCATION_ENTRY_CLEAN") == "bachelor's degree", "Bachelor's")
+    .when(col("EDUCATION_ENTRY_CLEAN") == "master's degree", "Master's")
+    .when(col("EDUCATION_ENTRY_CLEAN") == "ph.d. or professional degree", "PhD")
+)
+
+df_grouped = df_grouped.filter(
+    col("EDUCATION_GROUP").isNotNull() &
+    col("SALARY").isNotNull() &
+    col("MAX_YEARS_EXPERIENCE").isNotNull()
+)
+
+df_grouped.createOrReplaceTempView("education_jobs")
+scatter_data = spark.sql("""
+    SELECT 
+        EDUCATION_GROUP,
+        LOT_V6_SPECIALIZED_OCCUPATION_NAME,
+        MAX_YEARS_EXPERIENCE,
+        AVG(SALARY) AS AVERAGE_SALARY
+    FROM education_jobs
+    GROUP BY EDUCATION_GROUP, LOT_V6_SPECIALIZED_OCCUPATION_NAME, MAX_YEARS_EXPERIENCE
+""")
+
+df_plot = scatter_data.toPandas()
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Add jitter to experience
+df_plot["JITTER_EXPERIENCE"] = df_plot["MAX_YEARS_EXPERIENCE"] + np.random.normal(0, 0.5, size=len(df_plot))
+
+plt.figure(figsize=(14, 8))
+sns.set_style("whitegrid")
+
+sns.scatterplot(
+    data=df_plot,
+    x="JITTER_EXPERIENCE",
+    y="AVERAGE_SALARY",
+    hue="EDUCATION_GROUP",
+    style="EDUCATION_GROUP",
+    palette="Set2",
+    alpha=0.7
+)
+
+plt.title("Salary vs Experience by Education Level", fontsize=16, fontweight="bold")
+plt.xlabel("Max Years Experience (with jitter)", fontsize=12)
+plt.ylabel("Average Salary", fontsize=12)
+plt.legend(title="Education Level", bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.tight_layout()
+plt.show()
 
 ```
