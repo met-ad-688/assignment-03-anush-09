@@ -23,6 +23,9 @@ execute:
 ---
 
 ```{python}
+#| eval: false
+#| echo: false
+#| output: true
 import pandas as pd
 import plotly.express as px
 import plotly.io as pio
@@ -54,16 +57,26 @@ df.show(5)
 from pyspark.sql.functions import col
 
 # Section 1.1
-df_cleaned = df.withColumn("SALARY", col("SALARY").cast("double")) 
-df_cleaned = df_cleaned.withColumn("SALARY_TO", col("SALARY_TO").cast("double"))
-df_cleaned = df_cleaned.withColumn("SALARY_FROM", col("SALARY_FROM").cast("double"))
-df_cleaned = df_cleaned.withColumn("MIN_YEARS_EXPERIENCE", col("MIN_YEARS_EXPERIENCE").cast("integer"))
-df_cleaned = df_cleaned.withColumn("MAX_YEARS_EXPERIENCE", col("MAX_YEARS_EXPERIENCE").cast("integer"))
-df_cleaned = df_cleaned.filter(col("SALARY").isNotNull() & col("SALARY_TO").isNotNull() & col("SALARY_FROM").isNotNull() & col("MIN_YEARS_EXPERIENCE").isNotNull() & col("MAX_YEARS_EXPERIENCE").isNotNull())
+# df_cleaned = df.withColumn("SALARY", col("SALARY").cast("double")) 
+# df_cleaned = df_cleaned.withColumn("SALARY_TO", col("SALARY_TO").cast("double"))
+# df_cleaned = df_cleaned.withColumn("SALARY_FROM", col("SALARY_FROM").cast("double"))
+# df_cleaned = df_cleaned.withColumn("MIN_YEARS_EXPERIENCE", col("MIN_YEARS_EXPERIENCE").cast("integer"))
+# df_cleaned = df_cleaned.withColumn("MAX_YEARS_EXPERIENCE", col("MAX_YEARS_EXPERIENCE").cast("integer"))
+# df_cleaned = df_cleaned.filter(col("SALARY").isNotNull() & col("SALARY_TO").isNotNull() & col("SALARY_FROM").isNotNull() & col("MIN_YEARS_EXPERIENCE").isNotNull() & col("MAX_YEARS_EXPERIENCE").isNotNull())
+
+from pyspark.sql.functions import col
+
+df_cleaned = df \
+    .withColumn("SALARY", col("SALARY").cast("integer")) \
+    .withColumn("SALARY_FROM", col("SALARY_FROM").cast("integer")) \
+    .withColumn("SALARY_TO", col("SALARY_TO").cast("integer")) \
+    .withColumn("MIN_YEARS_EXPERIENCE", col("MIN_YEARS_EXPERIENCE").cast("integer")) \
+    .withColumn("MAX_YEARS_EXPERIENCE", col("MAX_YEARS_EXPERIENCE").cast("integer"))
 
 df_cleaned.show(5)
 
 # Section 1.2
+from pyspark.sql import functions as sf
 median_from = df_cleaned.approxQuantile("SALARY_FROM", [0.5], 0.0)[0]
 median_to = df_cleaned.approxQuantile("SALARY_TO", [0.5], 0.0)[0]
 median_salary = df_cleaned.approxQuantile("SALARY", [0.5], 0.0)[0]
@@ -71,4 +84,52 @@ median_salary = df_cleaned.approxQuantile("SALARY", [0.5], 0.0)[0]
 print("Median From:", median_from)
 print("Median To:", median_to)
 print("Median Salary:", median_salary)
+
+# Section 1.3
+from pyspark.sql.functions import when, lit
+df_imputed = df_cleaned.withColumn(
+    "SALARY",
+    when(col("SALARY").isNull(), lit(median_salary)).otherwise(col("SALARY"))
+)
+
+# Section 1.4
+from pyspark.sql.functions import regexp_replace
+df_cleaned = df_cleaned.withColumn(
+    "EDUCATION_LEVELS_NAME",
+    regexp_replace("EDUCATION_LEVELS_NAME", "[\\n\\r]", "")
+)
+
+# Section 1.5
+df_cleaned.write.mode("overwrite").option("header", True).csv("data/cleaned_data.csv")
+print(f"Data cleaning complete. Rows retained: {df_cleaned.count()}")
+```
+
+```{python}
+#| eval: true
+#| echo: true
+#| output: true
+
+# Read the cleaned CSV data
+import pandas as pd
+import plotly.express as px
+import plotly.io as pio
+from pyspark.sql import SparkSession
+import re
+import numpy as np
+import plotly.graph_objects as go
+from pyspark.sql.functions import col, split, explode, regexp_replace, transform, when
+from pyspark.sql import functions as F
+from pyspark.sql.functions import col, monotonically_increasing_id
+
+np.random.seed(42)
+
+pio.renderers.default = "notebook"
+# Initialize Spark Session
+spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+# Load Data
+df = spark.read.option("header", "true").option("inferSchema", "true").option("multiLine","true").option("escape", "\"").csv("./data/cleaned_data.csv")
+df.createOrReplaceTempView("job_postings")
+df.show(5)
+
 ```
