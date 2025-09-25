@@ -10,7 +10,7 @@ author:
 number-sections: true
 date: '2025-09-24'
 format:
-  html:
+  docx:
     theme: cerulean
     toc: true
     toc-depth: 2
@@ -21,10 +21,16 @@ execute:
   eval: true
   freeze: auto
 ---
+### Repository Link
+https://github.com/met-ad-688/assignment-03-anush-09.git
+
+### Generative AI use declaration
+1. Used generative AI to fix certain environment related errors during plot generation.
+2. Used for more understanding on pyspark based query and df generation. 
 
 ```{python}
 #| eval: true
-#| echo: false
+#| echo: true
 #| output: true
 import pandas as pd
 import plotly.express as px
@@ -67,7 +73,7 @@ df_cleaned = df \
     .withColumn("MAX_YEARS_EXPERIENCE", col("MAX_YEARS_EXPERIENCE").cast("integer"))
 
 # df_cleaned = df_cleaned.withColumn("ONET_NAME", regexp_replace("ONET_NAME", "/", "-"))
-df_cleaned.show(5)
+# df_cleaned.show(5)
 
 # Section 1.2
 from pyspark.sql import functions as sf
@@ -127,7 +133,7 @@ salary_distribution = spark.sql("""
     FROM job_postings
     WHERE SALARY_FROM IS NOT NULL AND SALARY_FROM > 0
 """)
-salary_distribution.show()
+# salary_distribution.show()
 df_pd = salary_distribution.toPandas()
 
 import seaborn as sns
@@ -289,11 +295,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 df_remote = spark.sql("SELECT * FROM job_postings")
-spark.sql("""
-    SELECT DISTINCT REMOTE_TYPE_NAME
-    FROM job_postings
-    WHERE REMOTE_TYPE_NAME IS NOT NULL
-""").show(truncate=False)
+# spark.sql("""
+#     SELECT DISTINCT REMOTE_TYPE_NAME
+#     FROM job_postings
+#     WHERE REMOTE_TYPE_NAME IS NOT NULL
+# """).show(truncate=False)
 
 
 from pyspark.sql.functions import lower, trim, col, when
