@@ -33,7 +33,7 @@ from pyspark.sql import SparkSession
 import re
 import numpy as np
 import plotly.graph_objects as go
-from pyspark.sql.functions import col, split, explode, regexp_replace, transform, when
+from pyspark.sql.functions import col, split, explode, regexp_replace, transform, when, lit
 from pyspark.sql import functions as F
 from pyspark.sql.functions import col, monotonically_increasing_id
 
@@ -55,13 +55,9 @@ df.createOrReplaceTempView("job_postings")
 # Show Schema and Sample Data
 print("---This is Diagnostic check, No need to print it in the final doc---")
 
-df.printSchema() # comment this line when rendering the submission
-df.show(5)
+# df.printSchema() # comment this line when rendering the submission
+# df.show(5)
 
-from pyspark.sql.functions import col
-
-
-from pyspark.sql.functions import col
 # Section 1.1
 df_cleaned = df \
     .withColumn("SALARY", col("SALARY").cast("integer")) \
@@ -70,7 +66,7 @@ df_cleaned = df \
     .withColumn("MIN_YEARS_EXPERIENCE", col("MIN_YEARS_EXPERIENCE").cast("integer")) \
     .withColumn("MAX_YEARS_EXPERIENCE", col("MAX_YEARS_EXPERIENCE").cast("integer"))
 
-df_cleaned = df_cleaned.withColumn("ONET_NAME", regexp_replace("ONET_NAME", "/", "-"))
+# df_cleaned = df_cleaned.withColumn("ONET_NAME", regexp_replace("ONET_NAME", "/", "-"))
 df_cleaned.show(5)
 
 # Section 1.2
@@ -84,55 +80,38 @@ print("Median To:", median_to)
 print("Median Salary:", median_salary)
 
 # Section 1.3
-from pyspark.sql.functions import when, lit
 df_imputed = df_cleaned.withColumn(
     "SALARY",
     when(col("SALARY").isNull(), lit(median_salary)).otherwise(col("SALARY"))
 )
+df_imputed = df_imputed.withColumn(
+    "SALARY_FROM",
+    when(col("SALARY_FROM").isNull(), lit(median_from)).otherwise(col("SALARY_FROM"))
+)
+df_imputed = df_imputed.withColumn(
+    "SALARY_TO",
+    when(col("SALARY_TO").isNull(), lit(median_to)).otherwise(col("SALARY_TO"))
+)
+
+df_imputed = df_imputed.withColumn(
+    "Average_Salary",
+    ((col("SALARY_FROM") + col("SALARY_TO")) / 2)
+)
 
 # Section 1.4
 from pyspark.sql.functions import regexp_replace
-df_cleaned = df_cleaned.withColumn(
+df_final = df_imputed.withColumn(
     "EDUCATION_LEVELS_NAME",
     regexp_replace("EDUCATION_LEVELS_NAME", "[\\n\\r]", "")
 )
 
 # Section 1.5
 # df_cleaned.write.mode("overwrite").option("header", True).csv("data/cleaned_data.csv")
-df_cleaned.write.mode("overwrite").parquet("data/cleaned_data.parquet")
-print(f"Data cleaning complete. Rows retained: {df_cleaned.count()}")
-df_cleaned.createOrReplaceTempView("job_postings")
+df_final.write.mode("overwrite").parquet("data/cleaned_data.parquet")
+print(f"Data cleaning complete. Rows retained: {df_final.count()}")
+df_final.createOrReplaceTempView("job_postings")
 ```
 
-```{python}
-#| eval: false
-#| echo: true
-#| output: true
-
-# Read the cleaned CSV data
-import pandas as pd
-import plotly.express as px
-import plotly.io as pio
-from pyspark.sql import SparkSession
-import re
-import numpy as np
-import plotly.graph_objects as go
-from pyspark.sql.functions import col, split, explode, regexp_replace, transform, when
-from pyspark.sql import functions as F
-from pyspark.sql.functions import col, monotonically_increasing_id
-
-np.random.seed(42)
-
-pio.renderers.default = "notebook"
-# Initialize Spark Session
-spark = SparkSession.builder.appName("LightcastData").getOrCreate()
-
-# Load Data
-df = spark.read.parquet("data/cleaned_data.parquet")
-df.createOrReplaceTempView("job_postings")
-df.show(5)
-
-```
 
 ```{python}
 #| eval: true
@@ -181,37 +160,72 @@ plt.show()
 #| output: true
 
 # Section 3
-salary_bubble = spark.sql("""
-    SELECT 
+# df_bubble = spark.sql("""
+#     SELECT
+#         LOT_OCCUPATION_NAME,
+#         percentile_approx(SALARY, 0.5) AS MEDIAN_SALARY,
+#         COUNT(*) AS JOB_COUNT
+#     FROM job_postings
+#     WHERE SALARY IS NOT NULL AND SALARY > 0 AND LOT_OCCUPATION_NAME IS NOT NULL
+#     GROUP BY LOT_OCCUPATION_NAME
+# """).toPandas()
+# import matplotlib.pyplot as plt
+
+# plt.figure(figsize=(16, 12))
+# scatter = plt.scatter(
+#     x=df_bubble["LOT_OCCUPATION_NAME"],
+#     y=df_bubble["MEDIAN_SALARY"],
+#     s=df_bubble["JOB_COUNT"],
+#     c=df_bubble["MEDIAN_SALARY"],
+#     cmap="coolwarm",
+#     alpha=0.7,
+#     edgecolors="black",
+#     linewidth=0.5
+# )
+
+# plt.xticks(rotation=45, ha="right")
+# plt.title("Median Salary by ONET Occupation Type", fontsize=18, fontweight="bold")
+# plt.xlabel("ONET Occupation", fontsize=14)
+# plt.ylabel("Median Salary", fontsize=14)
+# plt.grid(True)
+# plt.colorbar(scatter, label="Median Salary")
+# plt.tight_layout()
+# plt.show()
+
+
+# Bubble Chart: Median Salary by LOT_OCCUPATION_NAME and Job Count
+bubble_df = spark.sql("""
+    SELECT
         LOT_OCCUPATION_NAME,
-        approx_percentile(SALARY, 0.5) AS MEDIAN_SALARY,
+        percentile_approx(SALARY, 0.5) AS MEDIAN_SALARY,
         COUNT(*) AS JOB_COUNT
     FROM job_postings
-    WHERE SALARY IS NOT NULL AND SALARY > 0
+    WHERE SALARY IS NOT NULL AND SALARY > 0 AND LOT_OCCUPATION_NAME IS NOT NULL
     GROUP BY LOT_OCCUPATION_NAME
-""")
+    ORDER BY JOB_COUNT DESC
+""").toPandas()
 
-df_bubble = salary_bubble.toPandas()
+print("Top 5 occupations by job count and median salary:")
+print(bubble_df.head())
 
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(16, 12))
+plt.figure(figsize=(16, 10))
 scatter = plt.scatter(
-    x=df_bubble["LOT_OCCUPATION_NAME"],
-    y=df_bubble["MEDIAN_SALARY"],
-    s=df_bubble["JOB_COUNT"],
-    c=df_bubble["MEDIAN_SALARY"],
-    cmap="coolwarm",
+    x=bubble_df["LOT_OCCUPATION_NAME"],
+    y=bubble_df["MEDIAN_SALARY"],
+    s=bubble_df["JOB_COUNT"] / 10,  # Scale bubble size
+    c=bubble_df["MEDIAN_SALARY"],
+    cmap="viridis",
     alpha=0.7,
     edgecolors="black",
     linewidth=0.5
 )
 
-plt.xticks(rotation=45, ha="right")
-plt.title("Median Salary by ONET Occupation Type", fontsize=18, fontweight="bold")
-plt.xlabel("ONET Occupation", fontsize=14)
-plt.ylabel("Median Salary", fontsize=14)
-plt.grid(True)
+plt.xticks(rotation=60, ha="right")
+plt.title("Median Salary by Occupation (Bubble size = Job Count)", fontsize=16, fontweight="bold")
+plt.xlabel("Occupation Name")
+plt.ylabel("Median Salary")
 plt.colorbar(scatter, label="Median Salary")
 plt.tight_layout()
 plt.show()
@@ -222,36 +236,30 @@ plt.show()
 #| eval: true
 #| echo: true
 #| output: true
-#| 
-from pyspark.sql.functions import split, explode, trim, lower, col, regexp_replace, when
+
+from pyspark.sql.functions import col, when
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Parse EDUCATION_LEVELS_NAME into individual entries
-df_parsed = spark.sql("""
-    SELECT *,
-        split(regexp_replace(regexp_replace(EDUCATION_LEVELS_NAME, '^\[|\\]$', ''), '\"', ''), ',') AS EDUCATION_ARRAY
-    FROM job_postings
-""")
 
-#  Explode and normalize
-df_exploded = df_parsed.withColumn("EDUCATION_ENTRY", explode("EDUCATION_ARRAY"))
-df_exploded = df_exploded.withColumn("EDUCATION_ENTRY_CLEAN", trim(lower(col("EDUCATION_ENTRY"))))
-
-df_grouped = df_exploded.withColumn("EDUCATION_GROUP",
-    when(col("EDUCATION_ENTRY_CLEAN").isin("ged", "associate degree", "no education listed", "high school or ged"), "Associate or Lower")
-    .when(col("EDUCATION_ENTRY_CLEAN") == "bachelor's degree", "Bachelor's")
-    .when(col("EDUCATION_ENTRY_CLEAN") == "master's degree", "Master's")
-    .when(col("EDUCATION_ENTRY_CLEAN") == "ph.d. or professional degree", "PhD")
+df_grouped = df.withColumn("EDUCATION_GROUP",
+    when(col("MIN_EDULEVELS_NAME").rlike("(?i)ged|associate|no education"), "Associate or Lower")
+    .when(col("MIN_EDULEVELS_NAME").rlike("(?i)bachelor"), "Bachelor's")
+    .when(col("MIN_EDULEVELS_NAME").rlike("(?i)master"), "Master's")
+    .when(col("MIN_EDULEVELS_NAME").rlike("(?i)ph\\.d|doctorate|professional"), "PhD")
 )
+
 
 df_grouped = df_grouped.filter(
     col("EDUCATION_GROUP").isNotNull() &
     col("SALARY").isNotNull() &
     col("MAX_YEARS_EXPERIENCE").isNotNull()
 )
+
+
 df_grouped.createOrReplaceTempView("education_jobs")
+
 
 scatter_data = spark.sql("""
     SELECT 
@@ -265,7 +273,7 @@ scatter_data = spark.sql("""
 
 # Scatter plit
 df_plot = scatter_data.toPandas()
-df_plot["JITTER_EXPERIENCE"] = df_plot["MAX_YEARS_EXPERIENCE"] #+ np.random.normal(0, 0.5, size=len(df_plot))
+df_plot["JITTER_EXPERIENCE"] = df_plot["MAX_YEARS_EXPERIENCE"] + np.random.normal(0, 0.5, size=len(df_plot))
 
 plt.figure(figsize=(14, 12))
 sns.set_style("whitegrid")
@@ -283,6 +291,9 @@ sns.scatterplot(
 plt.title("Salary vs Experience by Education Level", fontsize=16, fontweight="bold")
 plt.xlabel("Max Years Experience (with jitter)", fontsize=12)
 plt.ylabel("Average Salary", fontsize=12)
+min_exp = int(df_plot["JITTER_EXPERIENCE"].min())
+max_exp = int(df_plot["JITTER_EXPERIENCE"].max()) + 1
+plt.xticks(range(min_exp, max_exp, 1))
 plt.legend(title="Education Level", bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
 plt.show()
