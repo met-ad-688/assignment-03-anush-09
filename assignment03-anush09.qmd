@@ -55,21 +55,14 @@ df.createOrReplaceTempView("job_postings")
 # Show Schema and Sample Data
 print("---This is Diagnostic check, No need to print it in the final doc---")
 
-# df.printSchema() # comment this line when rendering the submission
+df.printSchema() # comment this line when rendering the submission
 df.show(5)
 
 from pyspark.sql.functions import col
 
-# Section 1.1
-# df_cleaned = df.withColumn("SALARY", col("SALARY").cast("double")) 
-# df_cleaned = df_cleaned.withColumn("SALARY_TO", col("SALARY_TO").cast("double"))
-# df_cleaned = df_cleaned.withColumn("SALARY_FROM", col("SALARY_FROM").cast("double"))
-# df_cleaned = df_cleaned.withColumn("MIN_YEARS_EXPERIENCE", col("MIN_YEARS_EXPERIENCE").cast("integer"))
-# df_cleaned = df_cleaned.withColumn("MAX_YEARS_EXPERIENCE", col("MAX_YEARS_EXPERIENCE").cast("integer"))
-# df_cleaned = df_cleaned.filter(col("SALARY").isNotNull() & col("SALARY_TO").isNotNull() & col("SALARY_FROM").isNotNull() & col("MIN_YEARS_EXPERIENCE").isNotNull() & col("MAX_YEARS_EXPERIENCE").isNotNull())
 
 from pyspark.sql.functions import col
-
+# Section 1.1
 df_cleaned = df \
     .withColumn("SALARY", col("SALARY").cast("integer")) \
     .withColumn("SALARY_FROM", col("SALARY_FROM").cast("integer")) \
@@ -105,7 +98,8 @@ df_cleaned = df_cleaned.withColumn(
 )
 
 # Section 1.5
-df_cleaned.write.mode("overwrite").option("header", True).csv("data/cleaned_data.csv")
+# df_cleaned.write.mode("overwrite").option("header", True).csv("data/cleaned_data.csv")
+df_cleaned.write.mode("overwrite").parquet("data/cleaned_data.parquet")
 print(f"Data cleaning complete. Rows retained: {df_cleaned.count()}")
 df_cleaned.createOrReplaceTempView("job_postings")
 ```
@@ -134,14 +128,14 @@ pio.renderers.default = "notebook"
 spark = SparkSession.builder.appName("LightcastData").getOrCreate()
 
 # Load Data
-df = spark.read.option("header", "true").option("inferSchema", "true").option("multiLine","true").option("escape", "\"").csv("data/cleaned_data.csv")
+df = spark.read.parquet("data/cleaned_data.parquet")
 df.createOrReplaceTempView("job_postings")
 df.show(5)
 
 ```
 
 ```{python}
-#| eval: false
+#| eval: true
 #| echo: true
 #| output: true
 
@@ -160,7 +154,7 @@ df_pd = salary_distribution.toPandas()
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(14, 8))
+plt.figure(figsize=(18, 12))
 sns.set_style("whitegrid")
 
 sns.boxplot(
@@ -201,11 +195,11 @@ df_bubble = salary_bubble.toPandas()
 
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(16, 9))
+plt.figure(figsize=(16, 12))
 scatter = plt.scatter(
     x=df_bubble["LOT_OCCUPATION_NAME"],
     y=df_bubble["MEDIAN_SALARY"],
-    s=df_bubble["JOB_COUNT"] * 2,  # scale bubble size
+    s=df_bubble["JOB_COUNT"],
     c=df_bubble["MEDIAN_SALARY"],
     cmap="coolwarm",
     alpha=0.7,
@@ -225,22 +219,28 @@ plt.show()
 ```
 
 ```{python}
-#| eval: false
+#| eval: true
 #| echo: true
 #| output: true
 #| 
-from pyspark.sql.functions import explode, trim, lower, col
+from pyspark.sql.functions import split, explode, trim, lower, col, regexp_replace, when
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
 
-# Explode EDUCATION_LEVELS array into individual entries
-df_exploded = df_cleaned.withColumn("EDUCATION_ENTRY", explode("EDUCATION_LEVELS_NAME"))
+# Parse EDUCATION_LEVELS_NAME into individual entries
+df_parsed = spark.sql("""
+    SELECT *,
+        split(regexp_replace(regexp_replace(EDUCATION_LEVELS_NAME, '^\[|\\]$', ''), '\"', ''), ',') AS EDUCATION_ARRAY
+    FROM job_postings
+""")
 
-# Normalize text
+#  Explode and normalize
+df_exploded = df_parsed.withColumn("EDUCATION_ENTRY", explode("EDUCATION_ARRAY"))
 df_exploded = df_exploded.withColumn("EDUCATION_ENTRY_CLEAN", trim(lower(col("EDUCATION_ENTRY"))))
 
-from pyspark.sql.functions import when
-
 df_grouped = df_exploded.withColumn("EDUCATION_GROUP",
-    when(col("EDUCATION_ENTRY_CLEAN").isin("high school or ged", "associate degree", "no education listed"), "Associate or Lower")
+    when(col("EDUCATION_ENTRY_CLEAN").isin("ged", "associate degree", "no education listed", "high school or ged"), "Associate or Lower")
     .when(col("EDUCATION_ENTRY_CLEAN") == "bachelor's degree", "Bachelor's")
     .when(col("EDUCATION_ENTRY_CLEAN") == "master's degree", "Master's")
     .when(col("EDUCATION_ENTRY_CLEAN") == "ph.d. or professional degree", "PhD")
@@ -251,8 +251,8 @@ df_grouped = df_grouped.filter(
     col("SALARY").isNotNull() &
     col("MAX_YEARS_EXPERIENCE").isNotNull()
 )
-
 df_grouped.createOrReplaceTempView("education_jobs")
+
 scatter_data = spark.sql("""
     SELECT 
         EDUCATION_GROUP,
@@ -263,16 +263,11 @@ scatter_data = spark.sql("""
     GROUP BY EDUCATION_GROUP, LOT_V6_SPECIALIZED_OCCUPATION_NAME, MAX_YEARS_EXPERIENCE
 """)
 
+# Scatter plit
 df_plot = scatter_data.toPandas()
+df_plot["JITTER_EXPERIENCE"] = df_plot["MAX_YEARS_EXPERIENCE"] #+ np.random.normal(0, 0.5, size=len(df_plot))
 
-import seaborn as sns
-import matplotlib.pyplot as plt
-import numpy as np
-
-# Add jitter to experience
-df_plot["JITTER_EXPERIENCE"] = df_plot["MAX_YEARS_EXPERIENCE"] + np.random.normal(0, 0.5, size=len(df_plot))
-
-plt.figure(figsize=(14, 8))
+plt.figure(figsize=(14, 12))
 sns.set_style("whitegrid")
 
 sns.scatterplot(
@@ -291,5 +286,90 @@ plt.ylabel("Average Salary", fontsize=12)
 plt.legend(title="Education Level", bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
 plt.show()
+
+
+```
+
+```{python}
+#| eval: true
+#| echo: true
+#| output: true
+
+from pyspark.sql.functions import when, col, trim, regexp_replace
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Create REMOTE_GROUP column
+df_remote = spark.sql("SELECT * FROM job_postings")
+spark.sql("""
+    SELECT DISTINCT REMOTE_TYPE_NAME
+    FROM job_postings
+    WHERE REMOTE_TYPE_NAME IS NOT NULL
+""").show(truncate=False)
+
+
+from pyspark.sql.functions import lower, trim, col, when
+df_remote = df_remote.withColumn("REMOTE_TYPE_NAME_CLEAN", trim(lower(col("REMOTE_TYPE_NAME"))))
+df_remote = df_remote.withColumn("REMOTE_GROUP",
+    when(col("REMOTE_TYPE_NAME_CLEAN") == "not remote", "Onsite")
+    .when(col("REMOTE_TYPE_NAME_CLEAN").contains("hybrid"), "Hybrid")
+    .when(col("REMOTE_TYPE_NAME_CLEAN").contains("remote"), "Remote")
+    .otherwise("Onsite")
+)
+
+# Filter and create temp view
+df_remote_filtered = df_remote.filter(
+    col("SALARY").isNotNull() &
+    col("MAX_YEARS_EXPERIENCE").isNotNull() &
+    col("LOT_V6_SPECIALIZED_OCCUPATION_NAME").isNotNull()
+)
+df_remote_filtered.createOrReplaceTempView("remote_jobs")
+
+scatter_data = spark.sql("""
+    SELECT 
+        REMOTE_GROUP,
+        LOT_V6_SPECIALIZED_OCCUPATION_NAME,
+        MAX_YEARS_EXPERIENCE,
+        AVG(SALARY) AS AVERAGE_SALARY
+    FROM remote_jobs
+    GROUP BY REMOTE_GROUP, LOT_V6_SPECIALIZED_OCCUPATION_NAME, MAX_YEARS_EXPERIENCE
+""")
+
+# Scatter plot
+df_plot = scatter_data.toPandas()
+df_plot["JITTER_EXPERIENCE"] = df_plot["MAX_YEARS_EXPERIENCE"] #+ np.random.normal(0, 0.5, size=len(df_plot))
+
+plt.figure(figsize=(14, 12))
+sns.set_style("whitegrid")
+
+sns.scatterplot(
+    data=df_plot,
+    x="JITTER_EXPERIENCE",
+    y="AVERAGE_SALARY",
+    hue="REMOTE_GROUP",
+    style="REMOTE_GROUP",
+    palette="Set2",
+    alpha=0.7
+)
+
+plt.title("Salary vs Experience by Remote Work Type", fontsize=16, fontweight="bold")
+plt.xlabel("Max Years Experience (with jitter)", fontsize=12)
+plt.ylabel("Average Salary", fontsize=12)
+plt.legend(title="Remote Work Type", bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.tight_layout()
+plt.show()
+
+# Histogram
+df_hist = df_remote_filtered.select("SALARY", "REMOTE_GROUP").toPandas()
+
+plt.figure(figsize=(12, 7))
+sns.histplot(data=df_hist, x="SALARY", hue="REMOTE_GROUP", bins=40, kde=True, palette="Set2", alpha=0.6)
+plt.title("Salary Distribution by Remote Work Type", fontsize=16, fontweight="bold")
+plt.xlabel("Salary", fontsize=12)
+plt.ylabel("Frequency", fontsize=12)
+plt.tight_layout()
+plt.show()
+
 
 ```
