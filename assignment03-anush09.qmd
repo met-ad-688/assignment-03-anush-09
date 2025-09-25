@@ -8,7 +8,7 @@ author:
         city: Boston
         state: MA
 number-sections: true
-date: '2025-09-21'
+date: '2025-09-24'
 format:
   html:
     theme: cerulean
@@ -153,6 +153,8 @@ plt.tight_layout()
 plt.show()
 
 ```
+### Inference
+In most industries, the salary for full-time jobs is often around $88,000. But some sectors like Information, Health Care, and Professional Services show much higher salaries — going above $140,000 in many cases. This means technical and specialised roles are paying better. Also, “Unclassified Industry” appears frequently with varied salaries, which may indicate mixed or unclear job categories. Overall, salary depends a lot on the industry type and job role.
 
 ```{python}
 #| eval: true
@@ -160,62 +162,32 @@ plt.show()
 #| output: true
 
 # Section 3
-# df_bubble = spark.sql("""
-#     SELECT
-#         LOT_OCCUPATION_NAME,
-#         percentile_approx(SALARY, 0.5) AS MEDIAN_SALARY,
-#         COUNT(*) AS JOB_COUNT
-#     FROM job_postings
-#     WHERE SALARY IS NOT NULL AND SALARY > 0 AND LOT_OCCUPATION_NAME IS NOT NULL
-#     GROUP BY LOT_OCCUPATION_NAME
-# """).toPandas()
-# import matplotlib.pyplot as plt
-
-# plt.figure(figsize=(16, 12))
-# scatter = plt.scatter(
-#     x=df_bubble["LOT_OCCUPATION_NAME"],
-#     y=df_bubble["MEDIAN_SALARY"],
-#     s=df_bubble["JOB_COUNT"],
-#     c=df_bubble["MEDIAN_SALARY"],
-#     cmap="coolwarm",
-#     alpha=0.7,
-#     edgecolors="black",
-#     linewidth=0.5
-# )
-
-# plt.xticks(rotation=45, ha="right")
-# plt.title("Median Salary by ONET Occupation Type", fontsize=18, fontweight="bold")
-# plt.xlabel("ONET Occupation", fontsize=14)
-# plt.ylabel("Median Salary", fontsize=14)
-# plt.grid(True)
-# plt.colorbar(scatter, label="Median Salary")
-# plt.tight_layout()
-# plt.show()
 
 
 # Bubble Chart: Median Salary by LOT_OCCUPATION_NAME and Job Count
-bubble_df = spark.sql("""
+df_bubble = spark.sql("""
     SELECT
         LOT_OCCUPATION_NAME,
-        percentile_approx(SALARY, 0.5) AS MEDIAN_SALARY,
+        percentile_approx(Average_Salary, 0.5) AS MEDIAN_SALARY,
         COUNT(*) AS JOB_COUNT
     FROM job_postings
-    WHERE SALARY IS NOT NULL AND SALARY > 0 AND LOT_OCCUPATION_NAME IS NOT NULL
+    WHERE Average_Salary IS NOT NULL AND Average_Salary > 0 AND LOT_OCCUPATION_NAME IS NOT NULL
     GROUP BY LOT_OCCUPATION_NAME
     ORDER BY JOB_COUNT DESC
 """).toPandas()
 
+
 print("Top 5 occupations by job count and median salary:")
-print(bubble_df.head())
+print(df_bubble.head())
 
 import matplotlib.pyplot as plt
 
 plt.figure(figsize=(16, 10))
 scatter = plt.scatter(
-    x=bubble_df["LOT_OCCUPATION_NAME"],
-    y=bubble_df["MEDIAN_SALARY"],
-    s=bubble_df["JOB_COUNT"] / 10,  # Scale bubble size
-    c=bubble_df["MEDIAN_SALARY"],
+    x=df_bubble["LOT_OCCUPATION_NAME"],
+    y=df_bubble["MEDIAN_SALARY"],
+    s=df_bubble["JOB_COUNT"] / 10,  
+    c=df_bubble["MEDIAN_SALARY"],
     cmap="viridis",
     alpha=0.7,
     edgecolors="black",
@@ -223,7 +195,7 @@ scatter = plt.scatter(
 )
 
 plt.xticks(rotation=60, ha="right")
-plt.title("Median Salary by Occupation (Bubble size = Job Count)", fontsize=16, fontweight="bold")
+plt.title("Median Salary by Occupation", fontsize=16, fontweight="bold")
 plt.xlabel("Occupation Name")
 plt.ylabel("Median Salary")
 plt.colorbar(scatter, label="Median Salary")
@@ -231,6 +203,8 @@ plt.tight_layout()
 plt.show()
 
 ```
+### Inference
+Most top job roles like Data Analyst, BI Analyst, and Systems Architect show the same median salary of $116,300 as the salary data was cleaned and fixed using median. These jobs also have very high number of openings, which means strong demand. But since all salaries are similar and ONET_NAME only one category, so I used LOT_OCCUPATION_NAME to do this part of the assignment. 
 
 ```{python}
 #| eval: true
@@ -242,7 +216,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 
-
+# Section 4
 df_grouped = df.withColumn("EDUCATION_GROUP",
     when(col("MIN_EDULEVELS_NAME").rlike("(?i)ged|associate|no education"), "Associate or Lower")
     .when(col("MIN_EDULEVELS_NAME").rlike("(?i)bachelor"), "Bachelor's")
@@ -271,16 +245,16 @@ scatter_data = spark.sql("""
     GROUP BY EDUCATION_GROUP, LOT_V6_SPECIALIZED_OCCUPATION_NAME, MAX_YEARS_EXPERIENCE
 """)
 
-# Scatter plit
+# Scatter plt
 df_plot = scatter_data.toPandas()
-df_plot["JITTER_EXPERIENCE"] = df_plot["MAX_YEARS_EXPERIENCE"] + np.random.normal(0, 0.5, size=len(df_plot))
+df_plot["EXP_WITH_JITTER"] = df_plot["MAX_YEARS_EXPERIENCE"] + np.random.normal(0, 0.5, size=len(df_plot))
 
 plt.figure(figsize=(14, 12))
 sns.set_style("whitegrid")
 
 sns.scatterplot(
     data=df_plot,
-    x="JITTER_EXPERIENCE",
+    x="EXP_WITH_JITTER",
     y="AVERAGE_SALARY",
     hue="EDUCATION_GROUP",
     style="EDUCATION_GROUP",
@@ -291,8 +265,8 @@ sns.scatterplot(
 plt.title("Salary vs Experience by Education Level", fontsize=16, fontweight="bold")
 plt.xlabel("Max Years Experience (with jitter)", fontsize=12)
 plt.ylabel("Average Salary", fontsize=12)
-min_exp = int(df_plot["JITTER_EXPERIENCE"].min())
-max_exp = int(df_plot["JITTER_EXPERIENCE"].max()) + 1
+min_exp = int(df_plot["EXP_WITH_JITTER"].min())
+max_exp = int(df_plot["EXP_WITH_JITTER"].max()) + 1
 plt.xticks(range(min_exp, max_exp, 1))
 plt.legend(title="Education Level", bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
@@ -300,6 +274,9 @@ plt.show()
 
 
 ```
+### Inference:
+People with Associate or Lower education sometimes getting high salary like $156,000 for Business Intelligence Analyst and $139,000 for ERP Consultant, even they have 4-6 years experience. People with Bachelor degree also earning good, like Enterprise Architect getting more than $200,000 with 6-7 years experience. So, experience and job role looks more important than education level for salary.
+
 
 ```{python}
 #| eval: true
@@ -311,7 +288,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Create REMOTE_GROUP column
 df_remote = spark.sql("SELECT * FROM job_postings")
 spark.sql("""
     SELECT DISTINCT REMOTE_TYPE_NAME
@@ -349,14 +325,16 @@ scatter_data = spark.sql("""
 
 # Scatter plot
 df_plot = scatter_data.toPandas()
-df_plot["JITTER_EXPERIENCE"] = df_plot["MAX_YEARS_EXPERIENCE"] #+ np.random.normal(0, 0.5, size=len(df_plot))
+# Not using jitter as the image in assigment 
+# document does not seem to be using jitter.
+df_plot["EXP_WITH_JITTER"] = df_plot["MAX_YEARS_EXPERIENCE"] #+ np.random.normal(0, 0.5, size=len(df_plot))
 
 plt.figure(figsize=(14, 12))
 sns.set_style("whitegrid")
 
 sns.scatterplot(
     data=df_plot,
-    x="JITTER_EXPERIENCE",
+    x="EXP_WITH_JITTER",
     y="AVERAGE_SALARY",
     hue="REMOTE_GROUP",
     style="REMOTE_GROUP",
@@ -365,7 +343,7 @@ sns.scatterplot(
 )
 
 plt.title("Salary vs Experience by Remote Work Type", fontsize=16, fontweight="bold")
-plt.xlabel("Max Years Experience (with jitter)", fontsize=12)
+plt.xlabel("Max Years Experience", fontsize=12)
 plt.ylabel("Average Salary", fontsize=12)
 plt.legend(title="Remote Work Type", bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
@@ -384,3 +362,5 @@ plt.show()
 
 
 ```
+### Inference
+Remote jobs giving good salary in many roles like Data Analyst and Enterprise Architect — some above $130,000 with 5–10 years experience. Onsite jobs also paying good, especially for senior roles like SAP Analyst and ERP Consultant. Hybrid jobs between remote and onsite, but some hybrid roles like SAP Analyst and Enterprise Architect getting very high salary too. So, salary mostly depend on job role and experience, not only work type.
